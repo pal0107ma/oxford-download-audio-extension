@@ -1,16 +1,16 @@
 {
-  "name": "Download Audio Oxford Dictionary",
-  "description": "The power of React and TypeScript for building interactive Chrome extensions",
+  "name": "Words Pronunciation",
+  "description": "A useful Chrome extension for downloading words audio from Oxford Learners Dictionaries",
   "version": "1.0",
   "manifest_version": 3,
   "action": {
     "default_popup": "index.html",
-    "default_title": "Open the popup"
+    "default_title": "Download audio"
   },
   "icons": {
-    "16": "logo192.png",
-    "48": "logo192.png",
-    "128": "logo192.png"
+    "16": "logo.png",
+    "48": "logo.png",
+    "128": "logo.png"
   },
   "content_scripts": [
     {

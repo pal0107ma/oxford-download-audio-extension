@@ -13,9 +13,7 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "INLINE_RUNTIME_CHUNK=false craco build",
-    "eject": "react-scripts eject"
+    "build": "craco build"
   },
   "browserslist": {
     "production": [
