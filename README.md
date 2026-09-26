@@ -1,70 +1,108 @@
-# Getting Started with Create React App
+# Words Pronunciation
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+Extensión de Chrome que descarga el audio de pronunciación de las palabras del Oxford Learner's Dictionaries, en británico y norteamericano, en formato MP3 u OGG.
 
-## Available Scripts
+![Descarga del audio de una palabra desde el diccionario](docs/words-pronunciation-demo.gif)
 
-In the project directory, you can run:
+## Por qué existe
 
-### `npm start`
+La construí para un problema propio mientras estudiaba inglés. El diccionario reproduce la pronunciación, pero no permite conservarla, y para armar tarjetas de repaso espaciado hacía falta el archivo de audio.
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+La extensión lee la sección de fonética de la página abierta y ofrece cada pronunciación disponible como descarga directa, con el nombre del archivo listo para importar a una aplicación de tarjetas.
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+## Instalación
 
-### `npm test`
+No está publicada en la Chrome Web Store. Se instala compilándola y cargándola sin empaquetar:
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+```bash
+git clone https://github.com/pal0107ma/oxford-download-audio-extension.git
+cd oxford-download-audio-extension
+npm install
+npm run build
+```
 
-### `npm run build`
+Después, en Chrome:
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+1. Abrir `chrome://extensions`.
+2. Activar **Modo de desarrollador**.
+3. Pulsar **Cargar descomprimida** y seleccionar la carpeta `build/`.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+La extensión se activa únicamente en páginas de definición del diccionario (`oxfordlearnersdictionaries.com/definition/english/*`).
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+## Cómo funciona
 
-### `npm run eject`
+Una extensión de Manifest V3 vive en dos contextos que no comparten memoria: el *content script*, que corre dentro de la página y puede leer su DOM, y el *popup*, que es una aplicación aparte y no tiene acceso a esa página. La comunicación entre ambos es el núcleo del diseño.
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+```
+Página del diccionario
+        │
+        │  content.js lee el DOM al cargar
+        │  y guarda las pronunciaciones en memoria
+        ▼
+   chrome.runtime.onMessage
+        ▲
+        │  el popup pregunta al abrirse
+        │
+   Popup (React)  ──►  fetch del audio  ──►  Blob  ──►  descarga
+```
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+**El content script** localiza el contenedor `.phonetics` y recorre sus hijos. Cada bloque de pronunciación expone las URLs de audio en los atributos `data-src-mp3` y `data-src-ogg`, mientras que las etiquetas de variante y la transcripción fonética viven en elementos hermanos. El resultado se agrupa por variante —británica y norteamericana— y queda en memoria a la espera de una consulta.
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+**El popup**, al abrirse, consulta la pestaña activa mediante la API de mensajería y recibe esa estructura ya procesada. Nunca toca el DOM de la página.
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+**La descarga** se resuelve con `fetch` sobre la URL del audio y la conversión de la respuesta a un `Blob`, que se entrega al navegador como archivo. Esto evita abrir el audio en una pestaña nueva y permite controlar el nombre del archivo resultante.
 
-## Learn More
+## La decisión técnica: dos puntos de entrada sobre Create React App
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+Una extensión necesita **dos paquetes independientes**: el popup y el content script. Create React App admite uno solo y no expone su configuración de Webpack.
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+Las salidas habituales son hacer `eject`, lo que congela el proyecto en una configuración que ya nadie actualiza, o armar Webpack desde cero. Elegí una tercera: sobrescribir la configuración con [CRACO](https://craco.js.org/), conservando el andamiaje de CRA y sus actualizaciones.
 
-### Code Splitting
+```js
+// craco.config.js
+entry: {
+  main: [ /* … */ paths.appIndexJs ],
+  content: "./src/content.js",
+},
+output: {
+  filename: "static/js/[name].js",
+},
+optimization: {
+  runtimeChunk: false,
+},
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+Las dos primeras claves son las evidentes: declarar la segunda entrada y darle a cada paquete un nombre de archivo predecible, porque el manifiesto tiene que apuntar a una ruta fija y no puede seguir los hashes que CRA genera.
 
-### Analyzing the Bundle Size
+`runtimeChunk: false` es la que cuesta descubrir. Por defecto CRA extrae el runtime de Webpack a un archivo aparte que el HTML carga antes que el resto. Un content script no tiene HTML: Chrome inyecta exactamente los archivos que el manifiesto lista, en ese orden y nada más. Con el runtime separado, el content script se compila sin errores y falla en silencio al ejecutarse. Desactivar esa división obliga a que cada entrada sea un archivo autónomo.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+## Estructura
 
-### Making a Progressive Web App
+```
+src/
+  content.js                  Lectura del DOM del diccionario y respuesta a la mensajería
+  index.js                    Punto de entrada del popup
+  App.js                      Consulta a la pestaña activa y orquestación de la vista
+  components/
+    Phon.jsx                  Bloque de una variante: etiqueta y transcripción
+    DownloadAudioBtn.jsx      Descarga de un formato concreto
+    PlayAudioBtn.jsx          Reproducción sin descargar
+public/
+  manifest.json               Manifest V3: popup, content script y permisos
+craco.config.js               Configuración de Webpack con las dos entradas
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+## Limitaciones conocidas
 
-### Advanced Configuration
+- **Depende de la estructura del diccionario.** La extracción se apoya en las clases y atributos de datos del sitio. Un rediseño de la página rompe la extensión, y la corrección pasa por ajustar los selectores del content script.
+- **Solo diccionario de inglés.** El content script está restringido a las rutas de definición en inglés; otras secciones del sitio quedan fuera.
+- **Sin pruebas automatizadas.** El comportamiento se verificó manualmente sobre páginas reales.
+- **Permiso `tabs`.** Se usa para identificar la pestaña activa a la que enviar el mensaje. `activeTab` sería un permiso más acotado para el mismo fin.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+## Sobre el uso
 
-### Deployment
+Es una herramienta de estudio personal. Descarga archivos que el propio navegador ya solicita al reproducir la pronunciación en la página, y no elude ningún control de acceso ni redistribuye contenido. El material del diccionario pertenece a Oxford University Press; antes de darle cualquier uso que exceda el estudio individual, conviene revisar sus términos de servicio.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+## Stack
 
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+React · Tailwind CSS · Chrome Manifest V3 · Webpack mediante CRACO
